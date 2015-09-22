@@ -1,0 +1,129 @@
+---
+title: "Prediction Assignment Writeup"
+author: "LIM KAH KHENG"
+date: "22 September 2015"
+output: html_document
+---
+
+# Background
+
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+```{r}
+
+suppressWarnings(suppressMessages(library(Hmisc)))
+suppressWarnings(suppressMessages(library(caret)))
+suppressWarnings(suppressMessages(library(randomForest)))
+suppressWarnings(suppressMessages(library(foreach)))
+suppressWarnings(suppressMessages(library(doParallel)))
+
+set.seed(1234)
+
+setwd("e:/module8/project")
+
+# read files
+# values contained a "#DIV/0!" will be replaced with an NA value.
+
+trainingdata <- read.csv("pml-training.csv", na.strings=c("#DIV/0!") )
+testdata <- read.csv("pml-testing.csv", na.strings=c("#DIV/0!") )
+
+```
+
+
+# PreProcessing
+
+Columns 8 and above to cast to numeric
+
+```{r result="hide"}
+
+options(warn=-1)
+for(i in c(8:ncol(trainingdata)-1)) {trainingdata[,i] = as.numeric(as.character(trainingdata[,i]))}
+for(i in c(8:ncol(testdata)-1)) {testdata[,i] = as.numeric(as.character(testdata[,i]))}
+```
+
+
+Choose feature set that only included complete columns. Remove user name, timestamps and windows. 
+```{r}
+
+feature_set <- colnames(trainingdata[colSums(is.na(trainingdata)) == 0])[-(1:7)]
+model_data <- trainingdata[feature_set]
+feature_set
+```
+
+# Build model
+```{r}
+index <- createDataPartition(y=model_data$classe, p=0.75, list=FALSE )
+training <- model_data[index,]
+testing <- model_data[-index,]
+```
+
+# Random Forest with Parallel Processing
+
+We can now train a classifier with the training data. To do that we will use parallelise the processing with the foreach and doParallel package : we call registerDoParallel to instantiate the configuration. So we ask to process 6 random forest with 150 trees.
+
+```{r}
+registerDoParallel()
+x <- training[-ncol(training)]
+y <- training$classe
+
+rf <- foreach(ntree=rep(150, 6), .combine=randomForest::combine, .packages='randomForest') %dopar% {randomForest(x, y, ntree=ntree)}
+```
+
+
+# list the variables importance
+
+```{r}
+imp <- varImp(rf)
+imp$Variable <- row.names(imp)
+imp[order(imp$Overall, decreasing = T),]
+
+```
+
+# Prediction with confusion Matrix
+
+```{r}
+predictions1 <- predict(rf, newdata=training)
+confusionMatrix(predictions1,training$classe)
+
+
+predictions2 <- predict(rf, newdata=testing)
+confusionMatrix(predictions2,testing$classe)
+
+```
+
+
+# Prepare submission
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+x <- testdata
+x <- x[feature_set[feature_set!='classe']]
+answers <- predict(rf, newdata=x)
+
+answers
+
+pml_write_files(answers)
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
